@@ -34,6 +34,10 @@ create table if not exists public.transfers (
 -- write nothing. Only the server, using the service_role / secret key,
 -- can touch these tables. api_token values never leak to browsers.
 -- ---------------------------------------------------------------------
+grant usage on schema public to service_role;
+grant select, insert, update, delete on public.accounts, public.transfers to service_role;
+revoke all on public.accounts, public.transfers from anon, authenticated;
+
 alter table public.accounts  enable row level security;
 alter table public.transfers enable row level security;
 

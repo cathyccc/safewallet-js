@@ -90,6 +90,44 @@ describe('Happy path', () => {
   });
 });
 
+describe('Edge cases and records', () => {
+  it('returns 404 when the recipient account does not exist, and moves no money', async () => {
+    const res = await transfer(
+      { from_account_id: alice.id, to_account_id: crypto.randomUUID(), amount: 10 },
+      `Bearer ${alice.api_token}`
+    );
+    expect(res.status).toBe(404);
+    expect(await balanceOf(alice.id)).toBe(500);
+  });
+
+  it('allows transferring the full balance, leaving the sender at 0', async () => {
+    const res = await transfer(
+      { from_account_id: alice.id, to_account_id: bob.id, amount: 500 },
+      `Bearer ${alice.api_token}`
+    );
+    expect(res.status).toBe(200);
+    expect(await balanceOf(alice.id)).toBe(0);
+    expect(await balanceOf(bob.id)).toBe(600);
+  });
+
+  it('writes a record to the transfers table', async () => {
+    const res = await transfer(
+      { from_account_id: alice.id, to_account_id: bob.id, amount: 7.77 },
+      `Bearer ${alice.api_token}`
+    );
+    expect(res.status).toBe(200);
+
+    const { data, error } = await supabase
+      .from('transfers')
+      .select('*')
+      .eq('from_account_id', alice.id)
+      .eq('to_account_id', bob.id)
+      .eq('amount', 7.77);
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+  });
+});
+
 // ---------------------------------------------------------------------------
 describe('OWASP A03: Input validation (amount)', () => {
   const badAmounts = [
@@ -218,12 +256,19 @@ describe('OWASP A01: Broken access control (Authorization header)', () => {
     expect(JSON.stringify(res.body)).not.toContain(alice.api_token);
     expect(JSON.stringify(res.body)).not.toContain(bob.api_token);
   });
+
+  it('never leaks api_token values in error responses', async () => {
+    const res = await transfer(body(), `Bearer ${bob.api_token}`);
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain(alice.api_token);
+    expect(JSON.stringify(res.body)).not.toContain(bob.api_token);
+  });
 });
 
 // ---------------------------------------------------------------------------
 describe('Race conditions (double spend)', () => {
   it('parallel transfers can never overdraw the sender', async () => {
-    // Alice has 500. Fire 10 parallel transfers of 100: at most 5 may succeed.
+    // Alice has 500. Fire 10 parallel transfers of 100: exactly 5 should succeed..
     const results = await Promise.all(
       Array.from({ length: 10 }, () =>
         transfer({ from_account_id: alice.id, to_account_id: bob.id, amount: 100 }, `Bearer ${alice.api_token}`)
@@ -262,12 +307,11 @@ describe('OWASP A05: Security misconfiguration', () => {
 
 // ---------------------------------------------------------------------------
 describe('Database-level protection (Row Level Security)', () => {
-  it('the public anon key cannot read accounts or api tokens', async () => {
-    const anonKey = process.env.SUPABASE_ANON_KEY;
-    if (!anonKey) return; // optional: add SUPABASE_ANON_KEY to .env to enable this test
-
+  it.skipIf(!process.env.SUPABASE_ANON_KEY)('the public anon key cannot read accounts or api tokens', async () => {
     const { createClient } = await import('@supabase/supabase-js');
-    const anon = createClient(process.env.SUPABASE_URL, anonKey, { auth: { persistSession: false } });
+    const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+    });
     const { data } = await anon.from('accounts').select('api_token');
     expect(data ?? []).toHaveLength(0);
   });

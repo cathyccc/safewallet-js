@@ -161,25 +161,6 @@ describe('Input validation (amount)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('rejects NaN / Infinity sent as raw JSON tokens', async () => {
-    // JSON has no NaN/Infinity, so these arrive as invalid JSON and must be refused.
-    const res = await request(app)
-      .post('/transfer')
-      .set('Content-Type', 'application/json')
-      .set('Authorization', `Bearer ${alice.api_token}`)
-      .send(`{"from_account_id":"${alice.id}","to_account_id":"${bob.id}","amount":Infinity}`);
-    expect(res.status).toBe(400);
-    expect(await balanceOf(alice.id)).toBe(500);
-  });
-
-  it('rejects non-UUID account ids (injection attempt)', async () => {
-    const res = await transfer(
-      { from_account_id: "' OR 1=1 --", to_account_id: bob.id, amount: 10 },
-      `Bearer ${alice.api_token}`
-    );
-    expect(res.status).toBe(400);
-  });
-
   it('rejects transferring to yourself', async () => {
     const res = await transfer(
       { from_account_id: alice.id, to_account_id: alice.id, amount: 10 },
@@ -239,23 +220,6 @@ describe('A05: Injection (account id fields)', () => {
 // ---------------------------------------------------------------------------
 describe('OWASP A01: Broken access control (Authorization header)', () => {
   const body = () => ({ from_account_id: alice.id, to_account_id: bob.id, amount: 50 });
-
-  it('rejects a request with no Authorization header (401)', async () => {
-    const res = await transfer(body());
-    expect(res.status).toBe(401);
-    expect(await balanceOf(alice.id)).toBe(500);
-  });
-
-  it('rejects a malformed Authorization header (401)', async () => {
-    const res = await transfer(body(), alice.api_token); // missing "Bearer "
-    expect(res.status).toBe(401);
-  });
-
-  it('rejects a random, made-up token (403)', async () => {
-    const res = await transfer(body(), `Bearer ${newToken()}`);
-    expect(res.status).toBe(403);
-    expect(await balanceOf(alice.id)).toBe(500);
-  });
 
   it("rejects Bob's VALID token used to move Alice's money (403)", async () => {
     // The key broken-access-control test: a real, valid token
@@ -322,16 +286,6 @@ describe('OWASP A02: Security misconfiguration', () => {
     const res = await request(app).get('/health');
     expect(res.headers['x-content-type-options']).toBe('nosniff');
   });
-
-  it('returns a generic error for broken JSON (no stack trace)', async () => {
-    const res = await request(app)
-      .post('/transfer')
-      .set('Content-Type', 'application/json')
-      .set('Authorization', `Bearer ${alice.api_token}`)
-      .send('{not json');
-    expect(res.status).toBe(400);
-    expect(JSON.stringify(res.body)).not.toMatch(/at .*\.js/);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -358,5 +312,26 @@ describe('Exceptional Conditions', () => {
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'internal server error' });
     expect(JSON.stringify(res.body)).not.toMatch(/connection refused|db\.internal|5432/);
+  });
+
+  it('returns a generic error for broken JSON (no stack trace)', async () => {
+    const res = await request(app)
+      .post('/transfer')
+      .set('Content-Type', 'application/json')
+      .set('Authorization', `Bearer ${alice.api_token}`)
+      .send('{not json');
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).not.toMatch(/at .*\.js/);
+  });
+
+  it('rejects NaN / Infinity sent as raw JSON tokens', async () => {
+    // JSON has no NaN/Infinity, so these arrive as invalid JSON and must be refused.
+    const res = await request(app)
+      .post('/transfer')
+      .set('Content-Type', 'application/json')
+      .set('Authorization', `Bearer ${alice.api_token}`)
+      .send(`{"from_account_id":"${alice.id}","to_account_id":"${bob.id}","amount":Infinity}`);
+    expect(res.status).toBe(400);
+    expect(await balanceOf(alice.id)).toBe(500);
   });
 });

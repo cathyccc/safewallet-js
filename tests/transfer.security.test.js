@@ -129,7 +129,7 @@ describe('Edge cases and records', () => {
 });
 
 // ---------------------------------------------------------------------------
-describe('OWASP A03: Input validation (amount)', () => {
+describe('Input validation (amount)', () => {
   const badAmounts = [
     ['negative number', -50],
     ['zero', 0],
@@ -203,6 +203,35 @@ describe('OWASP A03: Input validation (amount)', () => {
     );
     expect(res.status).toBe(422);
     expect(await balanceOf(alice.id)).toBe(500);
+    expect(await balanceOf(bob.id)).toBe(100);
+  });
+});
+
+describe('A05: Injection (account id fields)', () => {
+  const payloads = [
+    ['SQL tautology', "' OR 1=1 --"],
+    ['stacked query', "'; DROP TABLE accounts; --"],
+    ['UNION select', "' UNION SELECT api_token FROM accounts --"],
+    ['PostgREST filter syntax', 'x,id.neq.0'],
+    ['script tag', '<script>alert(1)</script>'],
+    ['object instead of string', { $ne: null }],
+  ];
+
+  it.each(payloads)('rejects %s in from_account_id', async (_label, payload) => {
+    const res = await transfer(
+      { from_account_id: payload, to_account_id: bob.id, amount: 10 },
+      `Bearer ${alice.api_token}`
+    );
+    expect(res.status).toBe(400);
+    expect(await balanceOf(alice.id)).toBe(500); // accounts table still intact and untouched
+  });
+
+  it.each(payloads)('rejects %s in to_account_id', async (_label, payload) => {
+    const res = await transfer(
+      { from_account_id: alice.id, to_account_id: payload, amount: 10 },
+      `Bearer ${alice.api_token}`
+    );
+    expect(res.status).toBe(400);
     expect(await balanceOf(bob.id)).toBe(100);
   });
 });
@@ -283,7 +312,7 @@ describe('Race conditions (double spend)', () => {
 });
 
 // ---------------------------------------------------------------------------
-describe('OWASP A05: Security misconfiguration', () => {
+describe('OWASP A02: Security misconfiguration', () => {
   it('does not expose the X-Powered-By header', async () => {
     const res = await request(app).get('/health');
     expect(res.headers['x-powered-by']).toBeUndefined();
@@ -314,5 +343,20 @@ describe('Database-level protection (Row Level Security)', () => {
     });
     const { data } = await anon.from('accounts').select('api_token');
     expect(data ?? []).toHaveLength(0);
+  });
+});
+
+describe('Exceptional Conditions', () => {
+  it('returns a generic 500 with no internals when the database fails', async () => {
+    const broken = { from: () => { throw new Error('connection refused db.internal:5432'); } };
+    const res = await request(createApp({ supabase: broken }))
+      .post('/transfer')
+      .set('Content-Type', 'application/json')
+      .set('Authorization', `Bearer ${newToken()}`)
+      .send({ from_account_id: crypto.randomUUID(), to_account_id: crypto.randomUUID(), amount: 5 });
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'internal server error' });
+    expect(JSON.stringify(res.body)).not.toMatch(/connection refused|db\.internal|5432/);
   });
 });

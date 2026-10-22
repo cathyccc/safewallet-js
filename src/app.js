@@ -23,7 +23,7 @@ export function createApp({ supabase, maxTransferAmount = 10000, rateLimitMax = 
   app.disable('x-powered-by');
   app.use(helmet());
 
-  // OWASP A04 (Insecure Design): cap body size to stop oversized payloads.
+  // OWASP A06 (Insecure Design): cap body size to stop oversized payloads.
   app.use(express.json({ limit: '10kb' }));
 
   // OWASP A07 (Auth Failures): slow down token guessing / brute force.

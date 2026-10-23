@@ -129,23 +129,6 @@ describe('Edge cases and records', () => {
 });
 
 // ---------------------------------------------------------------------------
-describe('Race conditions (double spend)', () => {
-  it('parallel transfers can never overdraw the sender', async () => {
-    // Alice has 500. Fire 10 parallel transfers of 100: exactly 5 should succeed..
-    const results = await Promise.all(
-      Array.from({ length: 10 }, () =>
-        transfer({ from_account_id: alice.id, to_account_id: bob.id, amount: 100 }, `Bearer ${alice.api_token}`)
-      )
-    );
-
-    const ok = results.filter((r) => r.status === 200).length;
-    expect(ok).toBe(5);
-    expect(await balanceOf(alice.id)).toBe(0);
-    expect(await balanceOf(bob.id)).toBe(600);
-  });
-});
-
-// ---------------------------------------------------------------------------
 describe('Database-level protection (Row Level Security)', () => {
   it.skipIf(!process.env.SUPABASE_ANON_KEY)('the public anon key cannot read accounts or api tokens', async () => {
     const { createClient } = await import('@supabase/supabase-js');

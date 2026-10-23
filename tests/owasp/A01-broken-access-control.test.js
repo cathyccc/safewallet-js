@@ -100,10 +100,9 @@ test('a non-existent sender gets the same 403 as a wrong token (no account enume
   const fakeAccount = await request(app)
     .post('/transfer')
     .set('Authorization', `Bearer ${bob.api_token}`)
-    .send({ from_account_id: crypto.randomUUID(), to_account_id: bob.id, amount: 1 });   // a random ID that doesn't exist
-
+    .send({ from_account_id: crypto.randomUUID(), to_account_id: bob.id, amount: 1 });
   expect(fakeAccount.status).toBe(403);
-  expect(fakeAccount.body).toEqual(realAccount.body);   // must match the other response exactly
+  expect(fakeAccount.body).toEqual(realAccount.body);
 });
 
 test('tokens never appear in any response', async ({ app, alice, bob }) => {
@@ -114,7 +113,7 @@ test('tokens never appear in any response', async ({ app, alice, bob }) => {
 
   const denied = await request(app)
     .post('/transfer')
-    .set('Authorization', `Bearer ${crypto.randomUUID()}`)    // whose token gets denied here?
+    .set('Authorization', `Bearer ${crypto.randomUUID()}`)
     .send({ from_account_id: alice.id, to_account_id: bob.id, amount: 1 });
 
   expect(success.text).not.toContain(alice.api_token);

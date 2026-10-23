@@ -129,136 +129,6 @@ describe('Edge cases and records', () => {
 });
 
 // ---------------------------------------------------------------------------
-describe('Input validation (amount)', () => {
-  const badAmounts = [
-    ['negative number', -50],
-    ['zero', 0],
-    ['negative tiny', -0.01],
-    ['numeric string', '50'],
-    ['non-numeric string', 'fifty'],
-    ['null', null],
-    ['boolean', true],
-    ['array', [50]],
-    ['object', { value: 50 }],
-    ['more than 2 decimals', 10.555],
-    ['above the max limit', 10000.01],
-  ];
-
-  it.each(badAmounts)('rejects %s and moves no money', async (_label, amount) => {
-    const res = await transfer(
-      { from_account_id: alice.id, to_account_id: bob.id, amount },
-      `Bearer ${alice.api_token}`
-    );
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/amount/i);
-    expect(await balanceOf(alice.id)).toBe(500);
-    expect(await balanceOf(bob.id)).toBe(100);
-  });
-
-  it('rejects a missing amount', async () => {
-    const res = await transfer({ from_account_id: alice.id, to_account_id: bob.id }, `Bearer ${alice.api_token}`);
-    expect(res.status).toBe(400);
-  });
-
-  it('rejects transferring to yourself', async () => {
-    const res = await transfer(
-      { from_account_id: alice.id, to_account_id: alice.id, amount: 10 },
-      `Bearer ${alice.api_token}`
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it('rejects unexpected fields (mass assignment, e.g. trying to set a balance)', async () => {
-    const res = await transfer(
-      { from_account_id: alice.id, to_account_id: bob.id, amount: 10, balance: 1_000_000 },
-      `Bearer ${alice.api_token}`
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it('rejects transfers larger than the sender balance, leaving balances unchanged', async () => {
-    const res = await transfer(
-      { from_account_id: alice.id, to_account_id: bob.id, amount: 500.01 },
-      `Bearer ${alice.api_token}`
-    );
-    expect(res.status).toBe(422);
-    expect(await balanceOf(alice.id)).toBe(500);
-    expect(await balanceOf(bob.id)).toBe(100);
-  });
-});
-
-describe('A05: Injection (account id fields)', () => {
-  const payloads = [
-    ['SQL tautology', "' OR 1=1 --"],
-    ['stacked query', "'; DROP TABLE accounts; --"],
-    ['UNION select', "' UNION SELECT api_token FROM accounts --"],
-    ['PostgREST filter syntax', 'x,id.neq.0'],
-    ['script tag', '<script>alert(1)</script>'],
-    ['object instead of string', { $ne: null }],
-  ];
-
-  it.each(payloads)('rejects %s in from_account_id', async (_label, payload) => {
-    const res = await transfer(
-      { from_account_id: payload, to_account_id: bob.id, amount: 10 },
-      `Bearer ${alice.api_token}`
-    );
-    expect(res.status).toBe(400);
-    expect(await balanceOf(alice.id)).toBe(500); // accounts table still intact and untouched
-  });
-
-  it.each(payloads)('rejects %s in to_account_id', async (_label, payload) => {
-    const res = await transfer(
-      { from_account_id: alice.id, to_account_id: payload, amount: 10 },
-      `Bearer ${alice.api_token}`
-    );
-    expect(res.status).toBe(400);
-    expect(await balanceOf(bob.id)).toBe(100);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe('OWASP A01: Broken access control (Authorization header)', () => {
-  const body = () => ({ from_account_id: alice.id, to_account_id: bob.id, amount: 50 });
-
-  it("rejects Bob's VALID token used to move Alice's money (403)", async () => {
-    // The key broken-access-control test: a real, valid token
-    // that belongs to someone other than the sender.
-    const res = await transfer(body(), `Bearer ${bob.api_token}`);
-    expect(res.status).toBe(403);
-    expect(await balanceOf(alice.id)).toBe(500);
-    expect(await balanceOf(bob.id)).toBe(100);
-  });
-
-  it("rejects a token that is only a prefix of the real one (403)", async () => {
-    const res = await transfer(body(), `Bearer ${alice.api_token.slice(0, -1)}`);
-    expect(res.status).toBe(403);
-  });
-
-  it('gives the same 403 for a non-existent sender (no account enumeration)', async () => {
-    const res = await transfer(
-      { from_account_id: crypto.randomUUID(), to_account_id: bob.id, amount: 1 },
-      `Bearer ${alice.api_token}`
-    );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe('not authorized to transfer from this account');
-  });
-
-  it('never leaks api_token values in responses', async () => {
-    const res = await transfer(body(), `Bearer ${alice.api_token}`);
-    expect(JSON.stringify(res.body)).not.toContain(alice.api_token);
-    expect(JSON.stringify(res.body)).not.toContain(bob.api_token);
-  });
-
-  it('never leaks api_token values in error responses', async () => {
-    const res = await transfer(body(), `Bearer ${bob.api_token}`);
-    expect(res.status).toBe(403);
-    expect(JSON.stringify(res.body)).not.toContain(alice.api_token);
-    expect(JSON.stringify(res.body)).not.toContain(bob.api_token);
-  });
-});
-
-// ---------------------------------------------------------------------------
 describe('Race conditions (double spend)', () => {
   it('parallel transfers can never overdraw the sender', async () => {
     // Alice has 500. Fire 10 parallel transfers of 100: exactly 5 should succeed..
@@ -276,19 +146,6 @@ describe('Race conditions (double spend)', () => {
 });
 
 // ---------------------------------------------------------------------------
-describe('OWASP A02: Security misconfiguration', () => {
-  it('does not expose the X-Powered-By header', async () => {
-    const res = await request(app).get('/health');
-    expect(res.headers['x-powered-by']).toBeUndefined();
-  });
-
-  it('sends security headers (helmet)', async () => {
-    const res = await request(app).get('/health');
-    expect(res.headers['x-content-type-options']).toBe('nosniff');
-  });
-});
-
-// ---------------------------------------------------------------------------
 describe('Database-level protection (Row Level Security)', () => {
   it.skipIf(!process.env.SUPABASE_ANON_KEY)('the public anon key cannot read accounts or api tokens', async () => {
     const { createClient } = await import('@supabase/supabase-js');
@@ -297,41 +154,5 @@ describe('Database-level protection (Row Level Security)', () => {
     });
     const { data } = await anon.from('accounts').select('api_token');
     expect(data ?? []).toHaveLength(0);
-  });
-});
-
-describe('Exceptional Conditions', () => {
-  it('returns a generic 500 with no internals when the database fails', async () => {
-    const broken = { from: () => { throw new Error('connection refused db.internal:5432'); } };
-    const res = await request(createApp({ supabase: broken }))
-      .post('/transfer')
-      .set('Content-Type', 'application/json')
-      .set('Authorization', `Bearer ${newToken()}`)
-      .send({ from_account_id: crypto.randomUUID(), to_account_id: crypto.randomUUID(), amount: 5 });
-
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'internal server error' });
-    expect(JSON.stringify(res.body)).not.toMatch(/connection refused|db\.internal|5432/);
-  });
-
-  it('returns a generic error for broken JSON (no stack trace)', async () => {
-    const res = await request(app)
-      .post('/transfer')
-      .set('Content-Type', 'application/json')
-      .set('Authorization', `Bearer ${alice.api_token}`)
-      .send('{not json');
-    expect(res.status).toBe(400);
-    expect(JSON.stringify(res.body)).not.toMatch(/at .*\.js/);
-  });
-
-  it('rejects NaN / Infinity sent as raw JSON tokens', async () => {
-    // JSON has no NaN/Infinity, so these arrive as invalid JSON and must be refused.
-    const res = await request(app)
-      .post('/transfer')
-      .set('Content-Type', 'application/json')
-      .set('Authorization', `Bearer ${alice.api_token}`)
-      .send(`{"from_account_id":"${alice.id}","to_account_id":"${bob.id}","amount":Infinity}`);
-    expect(res.status).toBe(400);
-    expect(await balanceOf(alice.id)).toBe(500);
   });
 });

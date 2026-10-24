@@ -98,5 +98,16 @@ describe('A05:2025 Injection', () => {
       expect(res.body.error).toMatch(/same account/);
       expect(await balanceOf(alice.id)).toBe(500);
     })
-  })
+  });
+
+  test('rejects Infinity sent as raw JSON (400)', async ({ app, alice, bob, balanceOf }) => {
+    const res = await request(app)
+      .post('/transfer')
+      .set('Content-Type', 'application/json')
+      .set('Authorization', `Bearer ${alice.api_token}`)
+      .send(`{"from_account_id":"${alice.id}","to_account_id":"${bob.id}","amount":Infinity}`);
+
+    expect(res.status).toBe(400);
+    expect(await balanceOf(alice.id)).toBe(500);
+  });
 });

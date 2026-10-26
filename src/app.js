@@ -19,17 +19,27 @@ const DB_ERRORS = {
 export function createApp({ supabase, maxTransferAmount = 10000, rateLimitMax = 100 }) {
   const app = express();
 
-  // OWASP A05 (Security Misconfiguration): secure headers, hide framework.
+  // OWASP A02:2025 Security Misconfiguration: secure headers, hide framework.
   app.disable('x-powered-by');
   app.use(helmet());
 
-  // OWASP A06 (Insecure Design): cap body size to stop oversized payloads.
+  // OWASP A06:2025 Insecure Design: cap body size to stop oversized payloads.
   app.use(express.json({ limit: '10kb' }));
 
-  // OWASP A07 (Auth Failures): slow down token guessing / brute force.
+  // OWASP A07:2025 Authentication Failures: slow down token guessing / brute force.
+  // OWASP A09:2025 Logging: record when an IP gets blocked.
   app.use(
     '/transfer',
-    rateLimit({ windowMs: 60_000, limit: rateLimitMax, standardHeaders: 'draft-7', legacyHeaders: false })
+    rateLimit({
+      windowMs: 60_000,
+      limit: rateLimitMax,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      handler: (req, res) => {
+        console.warn('[safewallet] rate limit reached', { ip: req.ip });
+        res.status(429).json({ error: 'too many requests' });
+      },
+    })
   );
 
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -42,14 +52,14 @@ export function createApp({ supabase, maxTransferAmount = 10000, rateLimitMax = 
         return res.status(401).json({ error: 'missing or malformed Authorization header' });
       }
 
-      // 2. Input validation (OWASP A03): reject bad types, negatives, zero, NaN, etc.
+      // 2. Input validation (OWASP A05:2025 Injection): reject bad types, negatives, zero, NaN, etc.
       const { error, value } = validateTransferBody(req.body, maxTransferAmount);
       if (error) {
         return res.status(400).json({ error });
       }
       const { fromId, toId, amount } = value;
 
-      // 3. Access control (OWASP A01): the token must belong to the SENDER.
+      // 3. Access control (OWASP A01:2025 Broken Access Control): the token must belong to the SENDER.
       //    Having *a* valid token is not enough; it must be the from-account's own token.
       const { data: sender, error: lookupError } = await supabase
         .from('accounts')
@@ -62,6 +72,8 @@ export function createApp({ supabase, maxTransferAmount = 10000, rateLimitMax = 
       // Same response whether the account doesn't exist or the token is wrong,
       // so attackers can't use this endpoint to discover which account IDs exist.
       if (!sender || !tokensMatch(token, sender.api_token)) {
+        // OWASP A09:2025 Logging: record the attempt, but never the token itself.
+        console.warn('[safewallet] denied transfer', { from_account_id: fromId, ip: req.ip });
         return res.status(403).json({ error: 'not authorized to transfer from this account' });
       }
 
@@ -96,7 +108,8 @@ export function createApp({ supabase, maxTransferAmount = 10000, rateLimitMax = 
 
   app.use((_req, res) => res.status(404).json({ error: 'not found' }));
 
-  // OWASP A09/A05: log details server-side, return a generic message to the client
+  // OWASP A10:2025 Mishandling of Exceptional Conditions + A09:2025 Logging:
+  // log details server-side, return a generic message to the client
   // (no stack traces, SQL errors or table names leaked).
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {

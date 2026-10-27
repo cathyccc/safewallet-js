@@ -65,6 +65,20 @@ describe('A08:2025 Software or Data Integrity Failures', () => {
     expect(await balanceOf(alice.id)).toBe(500 - total);
   });
 
+  test('stores amounts with cents exactly, with no rounding errors (200)', async ({ app, alice, bob, balanceOf }) => {
+    const res = await request(app)
+      .post('/transfer')
+      .set('Authorization', `Bearer ${alice.api_token}`)
+      .send({ from_account_id: alice.id, to_account_id: bob.id, amount: 12.34 });
+
+    expect(res.status).toBe(200);
+    expect(await balanceOf(alice.id)).toBe(487.66);
+    expect(await balanceOf(bob.id)).toBe(112.34);
+
+    const { total } = await recordsFrom(alice.id);
+    expect(total).toBe(12.34);
+  });
+
   test('the public anon key cannot insert a fake transfer record', async ({ alice, bob, anonClient }) => {
     const { data, error } = await anonClient
       .from('transfers')

@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { describe } from 'vitest';
 import { test, expect } from '../support/fixtures.js';
+import crypto from 'node:crypto';
 
 describe('A06:2025 Insecure Design', () => {
   test('parallel transfers can never overdraw the sender', async ({app, alice, bob, balanceOf}) => {
@@ -52,5 +53,15 @@ describe('A06:2025 Insecure Design', () => {
 
     expect(res.status).toBe(413);
     expect(res.body).toEqual({ error: 'request body too large' });
+  });
+
+  test('rejects a transfer to an account that does not exist, and no money is lost (404)', async ({ app, alice, balanceOf }) => {
+    const res = await request(app)
+      .post('/transfer')
+      .set('Authorization', `Bearer ${alice.api_token}`)
+      .send({ from_account_id: alice.id, to_account_id: crypto.randomUUID(), amount: 12.34});
+    expect(res.status).toBe(404);
+    expect(await balanceOf(alice.id)).toBe(500);
+    expect(res.body.error).toMatch(/account not found/);
   });
 });
